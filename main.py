@@ -18,6 +18,7 @@ class Project(Scene3D):
 
     def __init__(self):
         super().__init__(WIDTH, HEIGHT, "Project")
+        self.geometries = {}
         self.show_mesh()
         
 
@@ -29,7 +30,15 @@ class Project(Scene3D):
             '''
         self.createPlane(6)
         self.addUAVs()
-        
+        print(u.closest_point_to_mesh(self.geometries["uav1"], np.array([0, 0, 0])))
+        # aabb
+        # u.get_aabb(self.shapes["cuboid_0_0"].cuboid)
+        # for key, value in self.geometries.items():
+        #     print(type(value))
+        #     aabb = u.get_aabb(value)
+        #     self.addShape(aabb, f"aabb_{key}")
+        #     self.geometries[f"aabb_{key}"] = aabb
+            
         
         
     
@@ -57,9 +66,18 @@ class Project(Scene3D):
         color_list = [Color.BLACK, Color.BLUE, Color.GREEN, Color.YELLOW, Color.CYAN, Color.MAGENTA]
         for i in range(6):
             mesh = Mesh3D("resources/uav3.obj", color=color_list[i])
+            
             mesh = u.unit_sphere_normalization(mesh)
             mesh = u.randomize_mesh_position(mesh)
+            
             self.addShape(mesh, f"uav{i+1}")
+            self.geometries[f"uav{i+1}"] = mesh
+            
+            # find the bounding box aabb
+            aabb = (u.mesh_to_o3d(mesh)).get_axis_aligned_bounding_box()
+            aabbCuboid = u.aabb_to_cuboid(aabb, color=Color.RED)
+            self.addShape(aabbCuboid, f"aabbCuboid{i+1}")
+            self.geometries[f"aabbCuboid{i+1}"] = aabbCuboid
         
     
     def createPlane(self, n: int):
@@ -88,7 +106,7 @@ class Project(Scene3D):
                 
                 
         
-        
+    
 if __name__ == "__main__":
     scene = Project()
     scene.mainLoop()    
