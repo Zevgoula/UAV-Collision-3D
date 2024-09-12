@@ -11,6 +11,7 @@ import numpy as np
 import utility as u
 import open3d as o3d    
 import trimesh
+import random
 
 WIDTH = 1000
 HEIGHT = 800
@@ -30,17 +31,20 @@ class UAV(Scene3D):
         if hasattr(self, 'uavs') and self.uavs != {}:
             self.removeUAVs()
 
-        self.uavs = {}
-        self.rotatedUavs = {}
-        self.geometries = {}
-        self.aabb = {}
-        self.kdop = {}
-        self.plane = {}
-        self.labels = {}
+        self.paused = True
+        self.uavs = {}                      #all the uavs in the scene
+        self.rotatedUavs = {}               #all the rotated uavs in the scene
+        self.geometries = {}                #all the geometries in the scene
+        self.aabb = {}                      #aabb for each uav
+        self.kdop = {}                      #kdop for each uav
+        self.plane = {}                     #plane with n x n grids
+        self.labels = {}                    #labels for the uavs
+        self.intersectingPoints = {}        #points where the uavs intersect
+        self.movingUavs = {}         # UAVs that are moving
         self.createPlatform(self.n)
         
     def on_key_press(self, symbol, n):
-        if symbol == Key.U:     #add uavs
+        if symbol == Key.U:                 #add uavs
             if self.uavs == {}:
                 print("Adding UAVS...")
                 self.addUAVs(self.n)
@@ -52,7 +56,7 @@ class UAV(Scene3D):
                     print("Removing AABB...")
                     self.remove_all_aabb()
             
-        if symbol == Key.P:     #add planes
+        if symbol == Key.P:                 #add planes
             if self.plane == {}:       
                 print("Creating Plane...")
                 self.createPlatform(self.n)
@@ -60,7 +64,7 @@ class UAV(Scene3D):
                 print("Removing Plane...")
                 self.removePlane()
         
-        if symbol == Key.A:     #add aabb
+        if symbol == Key.A:                 #add aabb
             if self.uavs == {} and self.rotatedUavs == {}: 
                 print("Please add UAVs first")
             else:
@@ -75,16 +79,27 @@ class UAV(Scene3D):
                     print("Removing AABB...")
                     self.remove_all_aabb()         
         
-        if symbol == Key.K:     #add kdop
+        if symbol == Key.K:                 #add kdop
             print("i want to cry")
             
-        if symbol == Key.C:     #collision detection
+        if symbol == Key.C:                 #collision detection
             if self.uavs == {} and self.rotatedUavs == {}:
-                print("Please add UAVs first or the aabb")
+                print("Please add UAVs")
+            elif self.uavs != {} and self.aabb == {}:
+                self.create_all_AABBs(self.uavs)
+                self.basicCollisionDetection(self.uavs, self.aabb, "accurate")
+            elif self.rotatedUavs != {} and self.aabb == {}:
+                self.create_all_AABBs(self.rotatedUavs)
+                self.basicCollisionDetection(self.rotatedUavs, self.aabb, "accurate")
+            elif self.uavs != {} and self.aabb != {}:
+                self.basicCollisionDetection(self.uavs, self.aabb, "accurate")
+            elif self.rotatedUavs != {} and self.aabb != {}:
+                self.basicCollisionDetection(self.rotatedUavs, self.aabb, "accurate")
             else:
+                print("Something went wrong")
                 #self.basicCollisionDetection(self.uavs, self.aabb, "aabb")
                 # self.basicCollisionDetection(self.uavs, self.aabb, "accurate")
-                self.basicCollisionDetection(self.rotatedUavs, self.aabb, "accurate")
+                
         if symbol == Key.R:
             if self.rotatedUavs == {}:
                 print("Adding Rotated UAVS...")
@@ -96,9 +111,21 @@ class UAV(Scene3D):
                 if self.aabb != {}:
                     print("Removing AABB...")
                     self.remove_all_aabb()
+                    
+        if symbol == Key.SPACE:
+            self.paused = not self.paused
+            print("Paused: ", self.paused)      
                 
-                
-            
+    def on_idle(self):
+        if not self.paused:
+            if self.uavs != {}:
+                for mesh_name, mesh in self.uavs.items():
+                    if mesh_name in self.movingUavs:
+                        x, y, z = 0.05 - random.random() * 0.05, 0.1 - random.random() * 0.1, 0.1 -random.random() * 0.1
+                        mesh.vertices += np.array([x, y, z])
+                        self.updateShape(mesh_name, True)
+                time.sleep(0.01)
+                         
     def addRotatedUavs(self, n: int):
         '''add all the rotated UAVs to the scene
         Args: n : int: number of UAVs to be added
@@ -123,8 +150,7 @@ class UAV(Scene3D):
             self.addShape(label, f"label{i+1}")
             self.addShape(mesh, f"uav{i+1}")
             self.rotatedUavs[f"uav{i+1}"] = mesh
-            self.labels[f"label{i+1}"] = label
-            
+            self.labels[f"label{i+1}"] = label           
                            
     def basicCollisionDetection(self, uavs, aabbs, method):
         if method == "aabb":
@@ -141,8 +167,8 @@ class UAV(Scene3D):
         args: uavs: dict: dictionary containing all the uavs
         returns: None
         '''
-        for i, (key, value) in enumerate(uavs.items()):
-            for j, (key2, value2) in enumerate(uavs.items()):
+        for i, (key, value) in enumerate(list(uavs.items())):
+            for j, (key2, value2) in enumerate(list(uavs.items())):
                 if j>i:
                     self.accurateCollision(value, value2, aabbs[f"aabbCuboid{i+1}"], aabbs[f"aabbCuboid{j+1}"], key, key2)        
     
@@ -154,12 +180,20 @@ class UAV(Scene3D):
         '''
         if self.aabbCollision(aabb1, aabb2, i, j, show_intersecting_cuboid=False):
             # if self.kdopCollision(uav1, uav2, i, j):
-            
+            collision, points = self.mesh_intersection(uav1, uav2)
             # Get the vertices of the two UAVs
-            if self.check_mesh_collision_trimesh(uav1, uav2):
-                print(f"Accurate Collision detected between {i} and {j}")
+            if collision:
+                print(f"ACCURATE Collision detected between {i} and {j}")
+                if i in self.movingUavs:
+                    self.movingUavs.pop(i)
+                if j in self.movingUavs:
+                    self.movingUavs.pop(j)
+                for point in points:
+                    index = random.random()
+                    self.addShape(Point3D(point, size=2, color=Color.BLACK), f"point_{index}")
+                    self.intersectingPoints[f"point_{index}"] = Point3D(point, size=2, color=Color.BLACK)
             
-    def check_mesh_collision_trimesh(self, mesh1, mesh2):
+    def mesh_intersection(self, mesh1, mesh2):
         """Check if two meshes collide using trimesh, an external library
         Inputs:
         - mesh1: the first mesh
@@ -174,7 +208,12 @@ class UAV(Scene3D):
         collision_manager.add_object("trimesh1", trimesh1)
         collision_manager.add_object("trimesh2", trimesh2)
         
-        return collision_manager.in_collision_internal()
+        _, point_objs = collision_manager.in_collision_internal(return_data=True)
+        points = []
+        for point_obj in point_objs:
+            points.append(point_obj.point)
+
+        return collision_manager.in_collision_internal(), points
                                      
     def aabbCollisionDetection(self, aabbs, show_intersecting_cuboid):
         '''detect collision using aabb
@@ -285,6 +324,9 @@ class UAV(Scene3D):
         if n > len(COLORS):
             n = len(COLORS)
             print("Number of UAVs is limited to ", len(COLORS))
+        
+        if self.uavs != {}:
+            self.removeUAVs
             
         # Add UAVs to the scene
         for i in range(n):
@@ -292,12 +334,16 @@ class UAV(Scene3D):
             mesh = Mesh3D("resources/uav3.obj", color=COLORS[i])
             
             mesh = u.unit_sphere_normalization(mesh)
+            rotation = get_rotation_matrix(np.pi, np.array([0, 1, 0]))
+            mesh.vertices = np.dot(mesh.vertices, rotation)
             mesh, position = u.randomize_mesh_position(mesh)
+            
             
             label = Label3D(position, f"uav{i+1}", color=Color.BLACK)
             self.addShape(label, f"label{i+1}")
             self.addShape(mesh, f"uav{i+1}")
             self.uavs[f"uav{i+1}"] = mesh
+            self.movingUavs[f"uav{i+1}"] = mesh
             self.labels[f"label{i+1}"] = label
     
     def createPlatform(self, n: int):
@@ -335,10 +381,15 @@ class UAV(Scene3D):
         for key in uavs.keys():
             self.removeShape(key)
         self.uavs = {}
+        self.movingUavs = {}
         self.rotatedUavs = {}
         for label in self.labels.keys():
             self.removeShape(label)
+        for point in self.intersectingPoints.keys():
+            self.removeShape(point)
+        
         self.labels = {}
+        self.intersectingPoints = {}
             
     def removePlane(self):
         '''remove the plane from the scene
