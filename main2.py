@@ -43,6 +43,7 @@ class UAV(Scene3D):
         self.movingUavs = {}         # UAVs that are moving
         self.createPlatform(self.n)
         self.fake_aabbs = {}
+        self.chulls = {}
         
     def on_key_press(self, symbol, n):
         if symbol == Key.U:                 #add uavs
@@ -98,9 +99,7 @@ class UAV(Scene3D):
                 self.basicCollisionDetection(self.rotatedUavs, self.aabb, "accurate")
             else:
                 print("Something went wrong")
-                #self.basicCollisionDetection(self.uavs, self.aabb, "aabb")
-                # self.basicCollisionDetection(self.uavs, self.aabb, "accurate")
-                
+
         if symbol == Key.R:
             if self.rotatedUavs == {}:
                 print("Adding Rotated UAVS...")
@@ -130,8 +129,7 @@ class UAV(Scene3D):
                             print("Problem with creating the AABBs. ", e)
                         
                     self.checkMovingCollision()
-                    # self.moveUavs
-                    # self.avoidCollision(self.uavs, self.aabb)
+                    # self.avoidCollision()
                 else: 
                     print("All UAVs have stopped moving")
                     self.paused = True
@@ -139,17 +137,7 @@ class UAV(Scene3D):
             else:
                 print("No UAVs in the scene, Press U to add UAVs")
 
-    def avoidCollision(self, uavs, aabbs):
-        for key1, value1 in aabbs.items():
-            for key2, value2 in aabbs.items():
-                if key2>key1:
-                    if self.aabbCollision(value1, value2, key1, key2, True):
-                        self.movingUavs.pop('uav'+key1[-1])
-                        self.movingUavs.pop('uav'+key2[-1])
-                        print("moving uavs: ", self.movingUavs)
-        
-    
-    def checkMovingCollision(self):
+    def avoidCollision(self):
         '''
             when uavs are moving, check if they collide with each other using the convex hull of the aabb in time t+dt and time t
             input: uavs: dict: dictionary containing all the uavs, aabbs: dict: dictionary containing all the aabbs
@@ -187,6 +175,70 @@ class UAV(Scene3D):
                     if 'chull' + str(i) not in chulls:
                         chulls['chull' + str(i)] = [] 
                     chulls['chull'+str(i)].append(self.aabbs_to_chull(aabb1, aabb2))
+
+
+
+        
+            
+        # check if the convex hulls are colliding
+        for i, chullvalue1 in enumerate(chulls.values()):
+            for j, chullvalue2 in enumerate(chulls.values()):
+                
+                if i<=j: 
+                    continue
+                elif i>j:
+                    u_var = self.chull_collision(chullvalue1[0], chullvalue2[0])
+                    if u_var[0]:
+                        print("Future Collision detected")
+                        print("norms: ", u_var[2])
+
+                        break
+                    else: 
+                        print("No collision detected")
+                        
+        
+        for uav in self.movingUavs.keys():
+            # i = int(uavs.split("uav")[1])
+            self.moveUav(uav, velocities2[uav])
+        return None    
+    
+    def checkMovingCollision(self):
+        '''
+            when uavs are moving, check if they collide with each other using the convex hull of the aabb in time t+dt and time t
+            input: uavs: dict: dictionary containing all the uavs, aabbs: dict: dictionary containing all the aabbs
+            return None
+        '''
+        chulls = {} 
+        velocities2 = self.get_velocities(self.uavs.keys())
+        
+        
+        # "move" the aabbs to the next position 
+        self.fake_aabbs = {}
+        for i, (aabb_name, aabb_value) in enumerate(self.aabb.items()):
+            if 'uav'+str(i+1) in self.movingUavs.keys():
+                points_old = self.getAllCuboidCorners(aabb_value)[0]
+                points = points_old
+                vel = velocities2['uav'+str(i+1)]
+                for i in range(len(points)):
+                    points[i].x += vel[0]
+                    points[i].y += vel[1]
+                    points[i].z += vel[2]
+                
+                min_value = points[0]
+                max_value = points[4]
+                
+                # create cuboid
+                self.fake_aabbs[aabb_name] = Cuboid3D(min_value, max_value)
+
+
+            
+        # find the convex hull of the aabbs
+        for i, aabb1 in enumerate(self.aabb.values()):
+            for j, aabb2 in enumerate(self.fake_aabbs.values()):
+                if i==j:
+                    if 'chull' + str(i) not in chulls:
+                        chulls['chull' + str(i)] = [] 
+                    chulls['chull'+str(i)].append(self.aabbs_to_chull(aabb1, aabb2))
         
             
         # check if the convex hulls are colliding
@@ -199,8 +251,9 @@ class UAV(Scene3D):
                     u_var = self.chull_collision(chullvalue1[0], chullvalue2[0])
                     if u_var[0]:
                         print("Collision detected")
-                        for k in range(0, len(u_var[1]), 2):
-                            
+                        self.aabbCollisionDetection(self.fake_aabbs, show_intersecting_cuboid=True)
+                        for k in range(0, len(u_var[1])):
+                        
                             self.addShape(Point3D(u_var[1][k], size = 0.5, color=Color.BLACK), f"point{random.randint(0, 10000)}")
                             
                         if 'uav'+str(i+1) in self.movingUavs and 'uav'+str(j+1) in self.movingUavs:
@@ -217,8 +270,6 @@ class UAV(Scene3D):
             self.moveUav(uav, velocities2[uav])
         return None
             
-    
-
     # checks if 2 chulls are colliding
     def chull_collision(self, chull1, chull2):  
         '''detect collision using convex hull
@@ -226,10 +277,7 @@ class UAV(Scene3D):
             chull2 = movingCHull(aabb2 - > aabb2+velocities)
             return true if collision is detected
         '''
-        return self.mesh_intersection(chull1, chull2) 
-
-        
-    
+        return self.mesh_intersection(chull1, chull2)
     
     # finds the convex hull of 2 aabbs
     def aabbs_to_chull(self, aabb1, aabb2):
@@ -253,9 +301,7 @@ class UAV(Scene3D):
         hull, _ = pcd.compute_convex_hull()
         hull = u.o3d_to_mesh(hull)
         
-        return hull
-        
-        
+        return hull   
             
     def draw_chull(self, chull, name):
         '''draw the convex hull in the scene
@@ -264,7 +310,6 @@ class UAV(Scene3D):
         '''
         try: self.updateShape(name)
         except: self.addShape(chull, name)
-        
         
     # returns the velocities dictionary - > key: uav_name, value: [x, y, z]
     def get_velocities(self, uav_names):
@@ -289,8 +334,8 @@ class UAV(Scene3D):
             aabb = self.aabb[f"aabbCuboid{i}"]
             aabb.translate([x, y, z])
             self.updateShape(f"aabbCuboid{i}", True)
-        self.updateShape(uav_name, True)
-                         
+        self.updateShape(uav_name, True)                    
+    
     # move only the aabb  
     def moveAabb(self, velocities, aabb_name):
         '''move the aabb in the scene'''
@@ -303,10 +348,7 @@ class UAV(Scene3D):
         self.fake_aabbs[aabb_name] = aabb_generalized.cuboid
         print("before:", self.aabb[aabb_name].x_min)
         print("after: ", self.fake_aabbs[aabb_name].x_min)
-
-        
-    
-        
+     
     # add all the rotated UAVs to the scene
     def addRotatedUavs(self, n: int):
         '''add all the rotated UAVs to the scene
@@ -362,7 +404,7 @@ class UAV(Scene3D):
         '''
         if self.aabbCollision(aabb1, aabb2, i, j, show_intersecting_cuboid=False):
             # if self.kdopCollision(uav1, uav2, i, j):
-            collision, points = self.mesh_intersection(uav1, uav2)
+            collision, points, _ = self.mesh_intersection(uav1, uav2)
             # Get the vertices of the two UAVs
             if collision:
                 print(f"ACCURATE Collision detected between {i} and {j}")
@@ -391,12 +433,14 @@ class UAV(Scene3D):
         collision_manager.add_object("trimesh1", trimesh1)
         collision_manager.add_object("trimesh2", trimesh2)
         
-        _, point_objs = collision_manager.in_collision_internal(return_data=True)
-        points = []
-        for point_obj in point_objs:
-            points.append(point_obj.point)
-
-        return collision_manager.in_collision_internal(), points
+        collision, points = collision_manager.in_collision_internal(return_data=True)
+        pointlist = []
+        norms = []
+        for point in points:
+            pointlist.append(point.point)
+            norms.append(point.normal)
+            
+        return collision, pointlist, norms
                                      
     def aabbCollisionDetection(self, aabbs, show_intersecting_cuboid):
         '''detect collision using aabb
