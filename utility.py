@@ -31,8 +31,8 @@ def randomize_mesh_position(mesh: Mesh3D):
     Returns: None
     
     '''
-    # Randomize the position of the mesh within [-3, 3] in x, y, z
-    new_position = np.array([(random.random() * 2), (random.random() * 2 +2),(random.random() * 3)])
+    # Randomize the position of the mesh
+    new_position = np.array([(random.random() * 4), (random.random() * 4 +2),(random.random() * 3)])
     mesh.vertices += new_position
     return mesh, new_position
 
@@ -126,7 +126,7 @@ def aabb_to_cuboid(aabb, color=Color.RED):
     
     
     # Create the cuboid
-    cuboid = Cuboid3D(min_coords, max_coords, color=color, width=2)
+    cuboid = (Cuboid3D(min_coords, max_coords, color=color, width=2))
     
     return cuboid
 

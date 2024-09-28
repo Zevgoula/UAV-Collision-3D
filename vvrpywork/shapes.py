@@ -2487,6 +2487,7 @@ class Cuboid3DGeneralized(Shape):
         Args:
             cuboid: The `Cuboid3D` object to copy.
         '''
+        self.cuboid = cuboid
         if isinstance(cuboid, Cuboid3D):
             self._vertices = np.array([[cuboid.x_min, cuboid.y_min, cuboid.z_min],
                                        [cuboid.x_max, cuboid.y_min, cuboid.z_min],
