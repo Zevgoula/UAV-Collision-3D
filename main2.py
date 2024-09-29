@@ -185,6 +185,7 @@ class UAV(Scene3D):
         if symbol ==Key.W:
             for uav_name, uav in self.uavs.items():
                 self.get_projections_of_mesh(uav, uav_name)
+            self.projectionCollisionDetection()
             
         if symbol == Key.Q:
             print("STATS: ", self.stat_times)
@@ -230,7 +231,29 @@ class UAV(Scene3D):
                 print("No UAVs in the scene, Press U to add UAVs")
 
                     
-    
+    def projectionCollisionDetection(self):
+        for uav_name1, uav1 in self.uavs.items():
+            for uav_name2, uav2 in self.uavs.items():
+                if uav_name1 < uav_name2:
+
+                    xy1 = self.projections[f'xy_{uav_name1}']
+                    xy2 = self.projections[f'xy_{uav_name2}']
+                    xz1 = self.projections[f'xz_{uav_name1}']
+                    xz2 = self.projections[f'xz_{uav_name2}']
+                    yz1 = self.projections[f'yz_{uav_name1}']
+                    yz2 = self.projections[f'yz_{uav_name2}']
+                    if self.mesh_intersection(xy1, xy2)[0]:
+                        print("Collision detected in xy projection for ", uav_name1, " and ", uav_name2)
+                        if self.mesh_intersection(xz1, xz2)[0]:
+                            print("Collision detected in xy and xz projection for ", uav_name1, " and ", uav_name2)
+                            if self.mesh_intersection(yz1, yz2)[0]:
+                                print("Collision detected in xy, xz and yz projection for ", uav_name1, " and ", uav_name2)
+                    else: 
+                        print("No collision detected in xy projection for ", uav_name1, " and ", uav_name2)
+        print("Projections checked")
+                        
+                                
+                    
     def get_projections_of_mesh(self, mesh, mesh_name):
         vertices = np.array(mesh.vertices)
         vertices1 = vertices.copy()
