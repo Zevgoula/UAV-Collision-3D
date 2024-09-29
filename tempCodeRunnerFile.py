@@ -1,3 +1,4 @@
-for k in range(0, len(u_var[1])):
-                            
-                            self.addShape(Point3D(u_var[1][k], size = 0.5, color=Color.BLACK), f"point{random.randint(0, 10000)}")
+     # xy_mesh.vertices[:2] == z_bound
+        # xz_mesh.vertices[:1] == y_bound
+        # yz_mesh.vertices[:0] == x_bound
+        
