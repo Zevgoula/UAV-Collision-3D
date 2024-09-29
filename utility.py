@@ -32,7 +32,7 @@ def randomize_mesh_position(mesh: Mesh3D):
     
     '''
     # Randomize the position of the mesh
-    new_position = np.array([(random.random() * 4), (random.random() * 4 +2),(random.random() * 3)])
+    new_position = np.array([(random.random() * 6), (random.random() * 6 +2),(random.random() * 4)])
     mesh.vertices += new_position
     return mesh, new_position
 

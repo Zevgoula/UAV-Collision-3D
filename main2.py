@@ -20,11 +20,11 @@ COLORS = [Color.RED, Color.GREEN, Color.BLUE, Color.YELLOW, Color.ORANGE, Color.
 
 class UAV(Scene3D):
     def __init__(self):
-        super().__init__(WIDTH, HEIGHT, "UAV", output=True, n_sliders=4)
+        super().__init__(WIDTH, HEIGHT, "UAV", output=True, n_sliders=0)
         self.reset()
     
     def reset(self):        
-        self.n = 5  # number of UAVs
+        self.n = 3  # number of UAVs
         if hasattr(self, 'geometries') and self.geometries != {}:
             self.removeAllGeometry()
 
@@ -41,9 +41,15 @@ class UAV(Scene3D):
         # self.labels = {}                    #labels for the uavs
         self.intersectingPoints = {}        #points where the uavs intersect
         self.movingUavs = {}         # UAVs that are moving
-        self.createPlatform(self.n)
+        if self.n<=5: self.createPlatform(self.n)
+        else: self.createPlatform(5)
         self.fake_aabbs = {}
         self.chulls = {}
+        self.interCuboids = {}
+        self.velocities = {}
+        self.last_time = time.time()
+        self.dt = 0.1
+        self.chullFromMesh = {}
         
     def on_key_press(self, symbol, n):
         if symbol == Key.U:                 #add uavs
@@ -61,7 +67,9 @@ class UAV(Scene3D):
         if symbol == Key.P:                 #add planes
             if self.plane == {}:       
                 print("Creating Plane...")
-                self.createPlatform(self.n)
+                if self.n<=5:
+                    self.createPlatform(self.n)
+                else: self.createPlatform(5)
             else:
                 print("Removing Plane...")
                 self.removePlane()
@@ -101,23 +109,32 @@ class UAV(Scene3D):
                 print("Something went wrong")
 
         if symbol == Key.R:
-            if self.rotatedUavs == {}:
+            if self.uavs == {}:
                 print("Adding Rotated UAVS...")
                 self.addRotatedUavs(self.n)
             else:
                 print("Removing Rotated UAVS...")
-                self.removeUAVs(uavs=self.rotatedUavs)
+                self.removeUAVs(uavs=self.uavs)
                 self.remove_all_aabb()
                 if self.aabb != {}:
                     print("Removing AABB...")
                     self.remove_all_aabb()
-                    
+        
+        if symbol == Key.X:
+            if self.rotatedUavs != {}:
+                self.chull_from_mesh(self.rotatedUavs.items())
+            elif self.uavs != {}:
+                self.chull_from_mesh(self.uavs.items())
+            else:
+                print("PLEASE ADD UAVS TO THE SCENE")
+
         if symbol == Key.SPACE:
             self.paused = not self.paused
             print("Paused: ", self.paused)  
                 
-                
     def on_idle(self):
+        if time.time() - self.last_time< self.dt:
+            return
         if not self.paused:
             if self.uavs != {}:
                 if self.movingUavs != {}:
@@ -128,8 +145,10 @@ class UAV(Scene3D):
                         except Exception as e:
                             print("Problem with creating the AABBs. ", e)
                         
-                    self.checkMovingCollision()
-                    # self.avoidCollision()
+                    
+                    # self.checkMovingCollision()
+                    self.avoidCollision()
+                    # self.launchUavs()
                 else: 
                     print("All UAVs have stopped moving")
                     self.paused = True
@@ -137,16 +156,86 @@ class UAV(Scene3D):
             else:
                 print("No UAVs in the scene, Press U to add UAVs")
 
-    def avoidCollision(self):
-        '''
-            when uavs are moving, check if they collide with each other using the convex hull of the aabb in time t+dt and time t
-            input: uavs: dict: dictionary containing all the uavs, aabbs: dict: dictionary containing all the aabbs
-            return None
-        '''
-        chulls = {} 
-        velocities2 = self.get_velocities(self.uavs.keys())
+    def chull_from_mesh(self, uavdict):
+        for uavname, uav in uavdict:
+            openMesh = u.mesh_to_o3d(uav)
+            convex_hull, _ = openMesh.compute_convex_hull()
+            chull = u.o3d_to_mesh(convex_hull)
+            
+            self.chullFromMesh[uavname] = chull
+            
+            self.addShape(chull, 'chull'+uavname)
+            
+    def directed_movement(self, vector, uav_name):
+        random_float = random.uniform(0.1, 0.4)
+        velocity = random_float*vector
+        self.moveUav(uav_name, velocity)
+        
+    def coinFlip(self):
+        if random.random()>0.95: return True 
+        return False
+    
+    def launchUavs(self):
+
+        if len(self.uavs) != (self.n)**2:
+            if self.coinFlip: 
+                    self.spawnNewDrone()
+                    print("New Drone Spawned")
+
+            # for j, (uav_name, uav) in enumerate(self.uavs.items()):
+        self.avoidCollision(False)
+                # self.landUav(uav, uav_name, list(self.plane.values())[j])
+        
+    
+    def landUav(self, uav, uav_name, cuboid):
+        vector = self.getLandingVector(uav, cuboid)
+        norm_vector = np.linalg.norm(vector)
+        if norm_vector>0.1:
+            self.directed_movement(vector, uav_name)
+        
+
+        
+    def getLandingVector(self, uav, cuboid):
+        cuboid_center = self.getAllCuboidCorners(cuboid)[1]
+        uav_center = np.mean(uav.vertices,axis=0)
+        cuboid_landing_point = cuboid_center + np.array([0, 0.25, 0])
+        uav_landing_point = uav_center -  np.array([0, 0.2, 0])
+        
+        return cuboid_landing_point-uav_landing_point     
+            
+            
+    def spawnNewDrone(self):
+        i = len(self.uavs)
+        mesh = Mesh3D("resources/uav3.obj", color=COLORS[i%len(COLORS)])
+        mesh = u.unit_sphere_normalization(mesh)
+        rotation = get_rotation_matrix(np.pi, np.array([0, 1, 0]))
+        mesh.vertices = np.dot(mesh.vertices, rotation)
+        mesh, position = u.randomize_mesh_position(mesh)
+        
+        self.addShape(mesh, f"uav{i+1}")
+        self.uavs[f"uav{i+1}"] = mesh
+        self.movingUavs[f"uav{i+1}"] = mesh
         
         
+    def get_directed_velocities(self):
+        my_dict = {}
+        for i, (uav_name, uav) in enumerate(self.uavs.items()):
+            vector = self.getLandingVector(uav, list(self.plane.values())[i])
+            norm_vector = np.linalg.norm(vector)
+            random_float = random.uniform(0.1, 0.4)
+            velocity = random_float*(vector/norm_vector)
+            if norm_vector <= 0.5:
+                velocity = np.array([0, 0, 0])    
+            my_dict[uav_name] = velocity
+        return my_dict
+        
+    def avoidCollision(self, flag = True):
+        if flag:
+            velocities2 = self.get_velocities(self.uavs.keys())
+        else: velocities2 = self.get_directed_velocities()
+        if all(np.array_equal(velocities2[uav], np.array([0, 0, 0])) for uav in velocities2.keys()):
+            self.paused = True
+        self.velocities = velocities2
         # "move" the aabbs to the next position 
         self.fake_aabbs = {}
         for i, (aabb_name, aabb_value) in enumerate(self.aabb.items()):
@@ -163,44 +252,56 @@ class UAV(Scene3D):
                 max_value = points[4]
                 
                 # create cuboid
-                print("moving uavs: ", self.movingUavs.keys())
                 self.fake_aabbs[aabb_name] = Cuboid3D(min_value, max_value)
 
-
-            
-        # find the convex hull of the aabbs
-        for i, aabb1 in enumerate(self.aabb.values()):
-            for j, aabb2 in enumerate(self.fake_aabbs.values()):
-                if i==j:
-                    if 'chull' + str(i) not in chulls:
-                        chulls['chull' + str(i)] = [] 
-                    chulls['chull'+str(i)].append(self.aabbs_to_chull(aabb1, aabb2))
-
-
-
         
+        for aabb1_name, aabb1 in self.aabb.items():
+            i = aabb1_name[-1]
+            # if 'chull'+i not in self.chulls:
+            #     self.chulls['chull'+i] = []
+            if aabb1_name in self.fake_aabbs.keys():
+                self.chulls['chull'+i] = self.aabbs_to_chull(self.aabb['aabbCuboid'+i], aabb1)
+            else:
+                self.chulls['chull'+i] = u.o3d_to_mesh(self.aabbs_to_chull(aabb1, aabb1))
+
             
         # check if the convex hulls are colliding
-        for i, chullvalue1 in enumerate(chulls.values()):
-            for j, chullvalue2 in enumerate(chulls.values()):
-                
+        for i, chullvalue1 in enumerate(self.chulls.values()):
+            for j, chullvalue2 in enumerate(self.chulls.values()):
                 if i<=j: 
                     continue
                 elif i>j:
-                    u_var = self.chull_collision(chullvalue1[0], chullvalue2[0])
+                    u_var = self.chull_collision(chullvalue1, chullvalue2)
                     if u_var[0]:
                         print("Future Collision detected")
-                        print("norms: ", u_var[2])
+                        current_velocity1 = self.velocities[f'uav'+str(i+1)]
+                        current_velocity2 = self.velocities[f'uav'+str(j+1)]
+                        deflected_velocity1 = self.normal_to_deflected_velocity(u_var[2][0], current_velocity1)
+                        deflected_velocity2 = self.normal_to_deflected_velocity(u_var[2][0], current_velocity2)
+                        self.velocities['uav'+str(i)] = deflected_velocity1*2
+                        self.velocities['uav'+str(j)] = deflected_velocity2*2
 
-                        break
-                    else: 
-                        print("No collision detected")
-                        
-        
-        for uav in self.movingUavs.keys():
-            # i = int(uavs.split("uav")[1])
-            self.moveUav(uav, velocities2[uav])
-        return None    
+                    
+        for i, (uav, uav_mesh) in enumerate(self.movingUavs.items()):
+            if flag:
+                self.moveUav(uav, self.velocities[uav])
+            else: 
+                if self.velocities[uav][0] == 0 and self.velocities[uav][1] == 0 and self.velocities[uav][2] == 0:
+                    uav_center = np.mean(uav_mesh.vertices,axis=0)
+                    cuboid = list(self.plane.values())[int(uav[-1])-1]
+                    cuboid_center = self.getAllCuboidCorners(cuboid)[1] + np.array([0, 0.5, 0])
+                    vector = cuboid_center - uav_center
+                    uav_mesh.vertices += vector
+                    self.updateShape(uav, True)
+                else:
+                    self.moveUav(uav, self.velocities[uav])
+        return None
+    
+    def normal_to_deflected_velocity(self, normal: np.ndarray, current_velocity):
+        try: collision_norm = normal #/np.linalg.norm(normal)
+        except Exception as e: print("Error e: ", e)
+        deflected_velocity =  np.array(current_velocity - 2*np.dot(current_velocity, collision_norm) * collision_norm)
+        return deflected_velocity
     
     def checkMovingCollision(self):
         '''
@@ -208,7 +309,7 @@ class UAV(Scene3D):
             input: uavs: dict: dictionary containing all the uavs, aabbs: dict: dictionary containing all the aabbs
             return None
         '''
-        chulls = {} 
+
         velocities2 = self.get_velocities(self.uavs.keys())
         
         
@@ -229,26 +330,26 @@ class UAV(Scene3D):
                 
                 # create cuboid
                 self.fake_aabbs[aabb_name] = Cuboid3D(min_value, max_value)
-
-
-            
-        # find the convex hull of the aabbs
-        for i, aabb1 in enumerate(self.aabb.values()):
-            for j, aabb2 in enumerate(self.fake_aabbs.values()):
-                if i==j:
-                    if 'chull' + str(i) not in chulls:
-                        chulls['chull' + str(i)] = [] 
-                    chulls['chull'+str(i)].append(self.aabbs_to_chull(aabb1, aabb2))
         
+        
+        for aabb1_name, aabb1 in self.aabb.items():
+            i = aabb1_name[-1]
+            # if 'chull'+i not in self.chulls:
+            #     self.chulls['chull'+i] = []
+            if aabb1_name in self.fake_aabbs.keys():
+                self.chulls['chull'+i] = self.aabbs_to_chull(self.aabb['aabbCuboid'+i], aabb1)
+            else:
+                self.chulls['chull'+i] = u.o3d_to_mesh(self.aabbs_to_chull(aabb1, aabb1))
+
             
         # check if the convex hulls are colliding
-        for i, chullvalue1 in enumerate(chulls.values()):
-            for j, chullvalue2 in enumerate(chulls.values()):
+        for i, chullvalue1 in enumerate(self.chulls.values()):
+            for j, chullvalue2 in enumerate(self.chulls.values()):
                 
                 if i<=j: 
                     continue
                 elif i>j:
-                    u_var = self.chull_collision(chullvalue1[0], chullvalue2[0])
+                    u_var = self.chull_collision(chullvalue1, chullvalue2)
                     if u_var[0]:
                         print("Collision detected")
                         self.aabbCollisionDetection(self.fake_aabbs, show_intersecting_cuboid=True)
@@ -256,11 +357,13 @@ class UAV(Scene3D):
                         
                             self.addShape(Point3D(u_var[1][k], size = 0.5, color=Color.BLACK), f"point{random.randint(0, 10000)}")
                             
-                        if 'uav'+str(i+1) in self.movingUavs and 'uav'+str(j+1) in self.movingUavs:
+                        if 'uav'+str(i+1) in self.movingUavs:
                             self.movingUavs.pop('uav'+str(i+1))
+                        if 'uav'+str(j+1) in self.movingUavs:
                             self.movingUavs.pop('uav'+str(j+1))
+                            
                         print("moving uavs: ", self.movingUavs)
-                        break
+                        # break
                     else: 
                         print("No collision detected")
                         
@@ -295,8 +398,6 @@ class UAV(Scene3D):
         
         pcd = o3d.geometry.PointCloud()
         pcd.points = o3d.utility.Vector3dVector(pointlist)
-        print("chull0 : ", pointlist[0])
-        print("point8: ", pointlist[8])
         # Compute the convex hull
         hull, _ = pcd.compute_convex_hull()
         hull = u.o3d_to_mesh(hull)
@@ -325,6 +426,7 @@ class UAV(Scene3D):
     # moves the uav and the aabb
     def moveUav(self, uav_name, velocity):
         '''move the uav in the scene'''
+        self.last_time=time.time()
         uav = self.uavs[uav_name]
         # x, y, z = self.get_velocities(self.uavs.keys())[uav_name]
         x, y, z = velocity
@@ -373,7 +475,8 @@ class UAV(Scene3D):
             # label = Label3D(position, f"uav{i+1}", color=Color.BLACK)
             # self.addShape(label, f"label{i+1}")
             self.addShape(mesh, f"uav{i+1}")
-            self.rotatedUavs[f"uav{i+1}"] = mesh
+            self.uavs[f"uav{i+1}"] = mesh
+            self.movingUavs[f"uav{i+1}"] = mesh
             # self.labels[f"label{i+1}"] = label           
                            
     def basicCollisionDetection(self, uavs, aabbs, method):
@@ -501,6 +604,7 @@ class UAV(Scene3D):
         )
         
         self.addShape(intersecting_cuboid, f"intersecting_cuboid_{aabb1}_{aabb2}")
+        self.interCuboids[f"intersecting_cuboid_{aabb1}_{aabb2}"] = intersecting_cuboid
 
     def rotatedCuboid(self, center, size, angle, axis):
         '''create a rotated cuboid
@@ -565,13 +669,10 @@ class UAV(Scene3D):
             mesh.vertices = np.dot(mesh.vertices, rotation)
             mesh, position = u.randomize_mesh_position(mesh)
             
-            
-            # label = Label3D(position, f"uav{i+1}", color=Color.BLACK)
-            # self.addShape(label, f"label{i+1}")
             self.addShape(mesh, f"uav{i+1}")
             self.uavs[f"uav{i+1}"] = mesh
             self.movingUavs[f"uav{i+1}"] = mesh
-            # self.labels[f"label{i+1}"] = label
+
     
     def createPlatform(self, n: int):
         '''Create a plane with n x n grids
@@ -586,15 +687,14 @@ class UAV(Scene3D):
                 
                 # Create a cuboid for each grid with alternating colors
                 color = Color.WHITE if (i + j) % 2 == 0 else Color.RED
-                cuboid = Cuboid3DGeneralized(
-                    Cuboid3D(
+                cuboid = Cuboid3D(
                         start_point, 
                         end_point, 
                         width=1, 
                         color=color, 
                         filled=True
                     )
-                )
+                
                 self.addShape(cuboid, f"pl_cuboid_{i}_{j}")
                 self.plane[f"pl_cuboid_{i}_{j}"] = cuboid
         
@@ -615,9 +715,18 @@ class UAV(Scene3D):
         for point in self.intersectingPoints.keys():
             self.removeShape(point)
         
+        for cuboid in self.interCuboids.keys():
+            self.removeShape(cuboid)
+        
+        for chull in self.chullFromMesh.keys():
+            self.removeShape(chull)
         # self.labels = {}
         self.intersectingPoints = {}
-            
+        self.chulls = {}
+        self.interCuboids = {}
+        self.velocities = {}
+        self.chullFromMesh = {}
+           
     def removePlane(self):
         '''remove the plane from the scene
          
