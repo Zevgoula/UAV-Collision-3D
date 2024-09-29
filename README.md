@@ -49,7 +49,8 @@ This Python script simulates the movement and collision detection of 3D drone mo
    - Python 3.10.13
    - Environment: 
    ```bash
-    conda create --name drone-sim python=3.10.13 conda activate drone-sim
+    conda create --name drone-sim python=3.10.13 
+    conda activate drone-sim
 
 2. **Installation**:
    ```bash
